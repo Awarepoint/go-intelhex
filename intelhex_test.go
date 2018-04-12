@@ -26,6 +26,102 @@ func TestChecksum(t *testing.T) {
 	}
 }
 
+func TestRecordMarshalBinary(t *testing.T) {
+	var cases = []struct {
+		expectErr bool
+		data      []byte
+		record    Record
+	}{
+		// Test all record types from https://en.wikipedia.org/wiki/Intel_HEX#Record_types
+		{
+			false,
+			decodeHex("10010000214601360121470136007EFE09D2190140"),
+			Record{
+				ByteCount:  0x10,
+				Address:    0x0100,
+				RecordType: RecordTypeData,
+				Data:       decodeHex("214601360121470136007EFE09D21901"),
+				Checksum:   0x40,
+			},
+		},
+		{
+			false,
+			decodeHex("00000001FF"),
+			Record{
+				ByteCount:  0x00,
+				Address:    0x0000,
+				RecordType: RecordTypeEOF,
+				Data:       []byte{},
+				Checksum:   0xFF,
+			},
+		},
+		{
+			false,
+			decodeHex("020000021200EA"),
+			Record{
+				ByteCount:  0x02,
+				Address:    0x0000,
+				RecordType: RecordTypeExtSegAddr,
+				Data:       []byte{0x12, 0x00},
+				Checksum:   0xEA,
+			},
+		},
+		{
+			false,
+			decodeHex("0400000300003800C1"),
+			Record{
+				ByteCount:  0x04,
+				Address:    0x0000,
+				RecordType: RecordTypeStartSegAddr,
+				Data:       decodeHex("00003800"),
+				Checksum:   0xC1,
+			},
+		},
+		{
+			false,
+			decodeHex("02000004FFFFFC"),
+			Record{
+				ByteCount:  0x02,
+				Address:    0x0000,
+				RecordType: RecordTypeExtLinAddr,
+				Data:       decodeHex("FFFF"),
+				Checksum:   0xFC,
+			},
+		},
+		{
+			false,
+			decodeHex("04000005000000CD2A"),
+			Record{
+				ByteCount:  0x04,
+				Address:    0x0000,
+				RecordType: RecordTypeStartLinAddr,
+				Data:       decodeHex("000000CD"),
+				Checksum:   0x2A,
+			},
+		},
+	}
+
+	for i, tc := range cases {
+		t.Logf("Case %d", i)
+
+		data, err := (&tc.record).MarshalBinary()
+		if tc.expectErr {
+			if err == nil {
+				t.Error("expected error")
+			}
+		} else {
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+			} else {
+				if !bytes.Equal(data, tc.data) {
+					t.Error("data mismatch")
+					t.Errorf("   expected=%X", tc.data)
+					t.Errorf("     actual=%X", data)
+				}
+			}
+		}
+	}
+}
 func TestRecordUnmarshalBinary(t *testing.T) {
 	var cases = []struct {
 		expectErr bool

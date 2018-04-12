@@ -45,6 +45,83 @@ type Record struct {
 	Checksum   byte
 }
 
+func (x *Record) MarshalBinary() (data []byte, err error) {
+	buf := &bytes.Buffer{}
+
+	// Check that the byte count and and data lengths match
+	if len(x.Data) != int(x.ByteCount) {
+		err = byteCountMismatchError{int(x.ByteCount), len(data)}
+	}
+
+	// Verify extended addresses have a byte count of 2
+	if x.RecordType == RecordTypeExtSegAddr && x.ByteCount != 0x02 {
+		err = fmt.Errorf("expected extended segment address record type to have byte count of 0x02 but got 0x%02X", x.ByteCount)
+		return
+	}
+	if x.RecordType == RecordTypeExtLinAddr && x.ByteCount != 0x02 {
+		err = fmt.Errorf("expected extended linear address record type to have byte count of 0x02 but got 0x%02X", x.ByteCount)
+		return
+	}
+
+	// Encode all the fields
+	err = binary.Write(buf, binary.BigEndian, &x.ByteCount)
+	if err != nil {
+		err = fmt.Errorf("error encoding byte count field: %v", err)
+		return
+	}
+	err = binary.Write(buf, binary.BigEndian, &x.Address)
+	if err != nil {
+		err = fmt.Errorf("error encoding address field: %v", err)
+		return
+	}
+
+	if x.RecordType >= NumRecordTypes {
+		err = invalidRecordTypeError(x.RecordType)
+		return
+	}
+	err = binary.Write(buf, binary.BigEndian, &x.RecordType)
+	if err != nil {
+		err = fmt.Errorf("error encoding record type field: %v", err)
+		return
+	}
+
+	if len(x.Data) > 0 {
+		err = binary.Write(buf, binary.BigEndian, &x.Data)
+		if err != nil {
+			err = fmt.Errorf("error encoding data field: %v", err)
+			return
+		}
+	}
+
+	data = buf.Bytes()
+
+	// Validate the checksum on the data so far
+	calculated := Checksum(data[0:len(data)])
+	if calculated != x.Checksum {
+		err = checksumError{x.Checksum, calculated}
+		return
+	}
+
+	// If the checksum is matched then write is as well
+	err = binary.Write(buf, binary.BigEndian, &x.Checksum)
+	if err != nil {
+		err = fmt.Errorf("error encoding checksum field: %v", err)
+		return
+	}
+
+	data = buf.Bytes()
+	return
+}
+
+type byteCountMismatchError struct {
+	byteCount  int
+	dataLength int
+}
+
+func (err byteCountMismatchError) Error() string {
+	return fmt.Sprintf("byte count was %d but data length was %d", err.byteCount, err.dataLength)
+}
+
 // IsChecksumError returns true if the given error was caused by a checksum error.
 func IsChecksumError(err error) bool {
 	_, ok := err.(checksumError)
@@ -128,11 +205,6 @@ type invalidRecordTypeError byte
 
 func (err invalidRecordTypeError) Error() string {
 	return fmt.Sprintf("invalid record type 0x%02X", byte(err))
-}
-
-type Segment struct {
-	Address uint32
-	Data    []byte
 }
 
 type Scanner struct {
@@ -232,4 +304,29 @@ func (s *Scanner) Scan() bool {
 
 func (s *Scanner) Segment() Segment {
 	return s.segment
+}
+
+type Segment struct {
+	Address uint32
+	Data    []byte
+}
+
+type SegmentSlice []*Segment
+
+func (s SegmentSlice) Len() int           { return len(s) }
+func (s SegmentSlice) Less(i, j int) bool { return s[i].Address < s[j].Address }
+func (s SegmentSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
+
+func (s SegmentSlice) Size() uint32 {
+	if len(s) == 0 {
+		return 0
+	}
+	if len(s) == 1 {
+		return uint32(len(s[0].Data))
+	}
+	var (
+		fs = s[0]
+		ls = s[len(s)-1]
+	)
+	return (ls.Address + uint32(len(ls.Data))) - fs.Address
 }

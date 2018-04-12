@@ -52,11 +52,11 @@ func main() {
 	}
 
 	// Sort the segments by address
-	sort.Sort(SegmentSlice(segments))
+	sort.Sort(intelhex.SegmentSlice(segments))
 
 	var (
 		sa  = segments[0].Address
-		buf = make([]byte, SegmentSlice(segments).Size())
+		buf = make([]byte, intelhex.SegmentSlice(segments).Size())
 	)
 
 	// Fill the buffer with 0xFF
@@ -84,26 +84,6 @@ func main() {
 	if err != nil {
 		fatalf("Error writing to destination: %v\n", err)
 	}
-}
-
-type SegmentSlice []*intelhex.Segment
-
-func (s SegmentSlice) Len() int           { return len(s) }
-func (s SegmentSlice) Less(i, j int) bool { return s[i].Address < s[j].Address }
-func (s SegmentSlice) Swap(i, j int)      { s[i], s[j] = s[j], s[i] }
-
-func (s SegmentSlice) Size() uint32 {
-	if len(s) == 0 {
-		return 0
-	}
-	if len(s) == 1 {
-		return uint32(len(s[0].Data))
-	}
-	var (
-		fs = s[0]
-		ls = s[len(s)-1]
-	)
-	return (ls.Address + uint32(len(ls.Data))) - fs.Address
 }
 
 func fatalf(format string, args ...interface{}) {
