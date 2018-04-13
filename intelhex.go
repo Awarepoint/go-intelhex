@@ -11,6 +11,8 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 )
 
 // Checksum returns the two's complement checksum described here:
@@ -37,6 +39,8 @@ const (
 	NumRecordTypes = 0x06
 )
 
+var EOFRecord = NewRecord(RecordTypeEOF, 0, nil)
+
 type Record struct {
 	ByteCount  byte
 	Address    uint16
@@ -45,6 +49,21 @@ type Record struct {
 	Checksum   byte
 }
 
+func NewRecord(recordType byte, address uint16, data []byte) (record *Record) {
+	record = new(Record)
+	record.ByteCount = byte(len(data))
+	record.Address = address
+	record.RecordType = recordType
+	record.Data = make([]byte, len(data))
+	copy(record.Data, data)
+
+	record.MarshalBinary()
+
+	return
+}
+
+// MarshalBinary encodes a record into a byte slice. It also calculates and fixes
+// the record's checksum.
 func (x *Record) MarshalBinary() (data []byte, err error) {
 	buf := &bytes.Buffer{}
 
@@ -93,14 +112,9 @@ func (x *Record) MarshalBinary() (data []byte, err error) {
 		}
 	}
 
+	// Calculate the checksum
 	data = buf.Bytes()
-
-	// Validate the checksum on the data so far
-	calculated := Checksum(data[0:len(data)])
-	if calculated != x.Checksum {
-		err = checksumError{x.Checksum, calculated}
-		return
-	}
+	x.Checksum = Checksum(data[0:len(data)])
 
 	// If the checksum is matched then write is as well
 	err = binary.Write(buf, binary.BigEndian, &x.Checksum)
@@ -329,4 +343,70 @@ func (s SegmentSlice) Size() uint32 {
 		ls = s[len(s)-1]
 	)
 	return (ls.Address + uint32(len(ls.Data))) - fs.Address
+}
+
+func (s SegmentSlice) Write(w io.Writer) error {
+	// Keep track of the address offset
+	var extendedLinearAddressBase uint32
+
+	for _, seg := range s {
+		// Check if we need to output a new address base
+		base := seg.Address >> 16
+		if base != extendedLinearAddressBase {
+			// Save the base so we don't write the extended record multiple times
+			extendedLinearAddressBase = base
+
+			// Write the
+			record := NewRecord(RecordTypeExtLinAddr, 0, []byte{
+				byte(base >> 8),
+				byte(base >> 0),
+			})
+			d, err := record.MarshalBinary()
+			if err != nil {
+				return err
+			}
+			fmt.Fprint(w, string(StartCode))
+			_, err = w.Write([]byte(strings.ToUpper(hex.EncodeToString(d))))
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(w, "")
+		}
+
+		// Write the data record
+		record := NewRecord(RecordTypeData, uint16(seg.Address&0xFFFF), seg.Data)
+		d, err := record.MarshalBinary()
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(w, string(StartCode))
+		_, err = w.Write([]byte(strings.ToUpper(hex.EncodeToString(d))))
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(w, "")
+	}
+
+	// Write the EOF record
+	d, err := EOFRecord.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	fmt.Fprint(w, string(StartCode))
+	_, err = w.Write([]byte(strings.ToUpper(hex.EncodeToString(d))))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(w, "")
+
+	return nil
+}
+
+func (s SegmentSlice) WriteFile(filename string) error {
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return s.Write(f)
 }

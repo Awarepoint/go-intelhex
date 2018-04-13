@@ -413,3 +413,44 @@ func TestScanner(t *testing.T) {
 		}
 	}
 }
+
+func TestSegmentSliceWrite(t *testing.T) {
+	ss := SegmentSlice{
+		{
+			Address: 0x0100,
+			Data:    decodeHex("214601360121470136007EFE09D21901"),
+		},
+		{
+			Address: 0x0110,
+			Data:    decodeHex("2146017E17C20001FF5F160021480119"),
+		},
+		{
+			Address: 0x00010120,
+			Data:    decodeHex("194E79234623965778239EDA3F01B2CA"),
+		},
+		{
+			Address: 0x00010130,
+			Data:    decodeHex("3F0156702B5E712B722B732146013421"),
+		},
+	}
+
+	exp := `:10010000214601360121470136007EFE09D2190140
+:100110002146017E17C20001FF5F16002148011928
+:020000040001F9
+:10012000194E79234623965778239EDA3F01B2CAA7
+:100130003F0156702B5E712B722B732146013421C7
+:00000001FF
+`
+
+	buf := &bytes.Buffer{}
+	err := ss.Write(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if buf.String() != exp {
+		t.Error("data mismatch")
+		t.Errorf("	expected=%s", exp)
+		t.Errorf("	  actual=%s", buf.String())
+	}
+}
